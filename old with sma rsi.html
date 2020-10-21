@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <meta http-equiv='X-UA-Compatible' content='IE=edge'>
+    <title>Coinflip Stock Market Visualizer</title>
+    <meta name='viewport' content='width=device-width, initial-scale=1'>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@2.9.4/dist/Chart.min.js"></script>
+</head>
+<body>
+
+<style>
+    *{
+        margin: 0px;
+    }
+    html{
+        color:black;
+        background-color: #fff;
+        font-family: 'Lucida Sans', 'Lucida Sans Regular', 'Lucida Grande', 'Lucida Sans Unicode', Geneva, Verdana, sans-serif;
+    }
+    p,h4,h5{
+        padding: 1px 10px;
+        margin: 1px;
+    }
+    div{
+        display: flex;
+        color: white;
+        background-color: rgb(72, 104, 146);
+    }
+    .red-text{
+        color:rgb(37, 255, 102);
+        font-weight: 700;
+    }
+    #coin-chart,#sma-strat{
+        margin-bottom: 0px;
+    }
+
+</style>
+<div>
+    <h4>
+        Coinflips: 
+    </h4>
+    <button onclick="newCoinData(100)">
+        Press for 100 coinflips
+    </button>
+    <button onclick="newCoinData(4000)">
+        Press for 4,000 coinflips
+    </button>
+    <button onclick="newCoinData(10000)">
+        Press for 10,000 coinflips
+    </button>
+    
+</div>
+<canvas id="coin-chart" width="98%" height="20px"></canvas>
+
+<div>
+    <h4>
+        Simple moving average strategy:
+    </h4>
+    <p>Simple Moving Average Length:</p>
+    <input id="sma-slider" type="range" min="1" max="960" value="50" onmouseup="updateSMA()">
+    <p class="red-text" id="sma-length">50</p>
+    <p>#Trades:</p>
+    <p class="red-text" id="paid-com">0</p>
+    <p>Average / Trade:</p>
+    <p class="red-text" id="ave-trade">0</p>
+    <p>Ave Ending Equity(refresh to reset):</p>
+    <p class="red-text" id="ave-ending">0</p>
+</div>
+<p>
+    This strategy involves buying when price breaks upwards thru moving average, and selling when it breaks below.
+    It takes both sides of the trade, so when one trade ends, it reverses its position.
+</p>
+<canvas id="sma-pos" width="98%" height="5px"></canvas>
+<canvas id="sma-strat" width="98%" height="15px"></canvas>
+<p>
+    The reason this has a high guess rating(+1% of n number of flips) is probably due to the fact that it isn't trying to
+    predict a correct flip, it is trying to predict %noncrossovers/%crossovers. When a crossover happens, it pays 1 coin distance 
+    because of uncertainty against another crossover. Too many crossovers will cause a large loss. Each move that does not have a crossover
+    event will typically add equity. Even if each coin flip
+    is a completely independent event, the majority of each coin position has a smaller chance of going in a direction
+    where it would cross the SMA. In other words, it has a higher chance of staying outside of the SMA than crossing it, resulting in
+    a correct guess.
+</p>
+
+<div>
+    <h4>
+        Relative Strength Index (RSI):
+    </h4>
+    <p>RSI Length:</p>
+    <input id="rsi-slider" type="range" min="6" max="42" value="14" onmouseup="updateRSI()">
+    <p class="red-text" id="rsi-length">14</p>
+    <p># Trades:</p>
+    <p class="red-text" id="paid-com-rsi">0</p>
+    <p>Average / Trade:</p>
+    <p class="red-text" id="ave-trade-rsi">0</p>
+    <p>Ave Ending Equity(refresh to reset):</p>
+    <p class="red-text" id="ave-ending-rsi">0</p>
+    
+</div>
+<p>
+    RSI measures recent changes to past price action and plots it on a 0-100% graph. The opening strategy buys below 30% and shorts above 70%.
+    The closing strategy flattens the order at 50("fair value").
+</p>
+<canvas id="rsi-chart" width="98%" height="10px"></canvas>
+<canvas id="rsi-pos" width="98%" height="5px"></canvas>
+<canvas id="rsi-strat" width="98%" height="10px"></canvas>
+
+
+
+<script>
+// ---------------------------------------------------------------------- global vars -----------------------------------------------------------------------
+let globalCoinData = [0];
+let globalCoinOffset = [];
+let globalCoinIndex = [];
+let globalSMA = [];
+let globalRSI = [0];
+let globalSMAEquity = [0];
+let globalRSIEquity = [0];
+let globalSMAPos = [0];
+let globalRSIPos = [0];
+let globalConfigNumCoinflips;
+let globalNumTrades = 0;
+let globalSMAEnding = [];
+let globalConfigSMALength = 50;
+let globalPaidInCommission = 0;
+let globalConfigRSILength = 14;
+let globalRSIOSOBLines = [[30],[70]];
+// config stuff
+const globalCrossCommission = 1; //this commission is only here to counteract breaking even on a crossover
+const globalConfigNumWrongMoves = 40;
+const globalChartOptions = {
+    scales: {
+        yAxes: [{
+            ticks: {
+                beginAtZero: true,
+                stepSize: 1
+            }
+        }]
+    },
+    hover: {
+        animationDuration: 0
+    },
+    animation: {
+        duration: 0,
+        easing: 'none'
+    },
+    tooltips: {
+        mode: 'nearest',
+        intersect: false
+    }
+};
+
+// ---------------------------------------------------------------------- sliders -----------------------------------------------------------------------
+let sliderInputSMA = document.getElementById("sma-slider");
+let sliderInputRSI = document.getElementById("rsi-slider");
+
+sliderInputSMA.oninput = function() {
+    let sliderOutput = document.getElementById("sma-length");
+    sliderOutput.innerHTML = this.value;
+};
+sliderInputRSI.oninput = function() {
+    let sliderOutput = document.getElementById("rsi-length");
+    sliderOutput.innerHTML = this.value;
+};
+
+const updateSMA = () => {
+    //black magic to get slider update value
+    let sliderOutput = document.getElementById("sma-length");
+    let realSliderValue = parseInt(sliderOutput.innerHTML);
+    //console.log(realSliderValue);
+
+    //change global SMA
+    globalConfigSMALength = realSliderValue;
+
+    //update
+    doSMAStuff();
+};
+
+const updateRSI = () => {
+    //black magic to get slider update value
+    let sliderOutput = document.getElementById("rsi-length");
+    let realSliderValue = parseInt(sliderOutput.innerHTML);
+    //console.log(realSliderValue);
+
+    //change global SMA
+    globalConfigRSILength = realSliderValue;
+
+    //update
+    doRSIStuff();
+};
+
+
+
+
+
+// ---------------------------------------------------------------------- charts -----------------------------------------------------------------------
+// coin chart
+const ctx = document.getElementById('coin-chart').getContext('2d');
+let coinChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+        labels: globalCoinIndex,
+        datasets: [{
+            label: 'Cumulative Offset: Heads - Tails',
+            data: globalCoinData,
+            lineTension: 0,
+            backgroundColor: 'rgba(0,0,0,0)',
+            radius: 0,
+            borderWidth: 1,
+            borderColor: 'rgba(0,0,0,1)'
+        },{
+            label: 'Simple Moving Average ' + globalConfigSMALength + ' Flips',
+            data: globalSMA,
+            lineTension: 0,
+            backgroundColor: 'rgba(0,0,0,0)',
+            radius: 0,
+            borderWidth: 2,
+            borderColor: 'rgba(250,0,0,0.6)'
+        }]
+    },
+    options: globalChartOptions
+});
+
+
+// sma position chart
+const ctxpos = document.getElementById('sma-pos').getContext('2d');
+let smaPos = new Chart(ctxpos, {
+    type: 'line',
+    data: {
+        labels: globalCoinIndex,
+        datasets: [{
+            label: 'Position Type: (0 = no position, 1 = long, -1 = short)',
+            data: globalSMAPos,
+            lineTension: 0,
+            backgroundColor: 'rgba(60,60,60,1)',
+            radius: 0,
+            borderWidth: 0,
+            borderColor: 'rgba(0,0,0,1)'
+        }]
+    },
+    options: globalChartOptions
+});
+
+
+// sma equity chart
+const ctxsma = document.getElementById('sma-strat').getContext('2d');
+
+let smaChart = new Chart(ctxsma, {
+    type: 'line',
+    data: {
+        labels: globalCoinIndex,
+        datasets: [{
+            label: 'Coin distance equity (correct - wrong)',
+            data: globalSMAEquity,
+            lineTension: 0,
+            backgroundColor: 'rgba(228, 170, 12, 1)',
+            radius: 0,
+            borderWidth: 1,
+            borderColor: 'rgba(0,0,0,1)'
+        }]
+    },
+    options: globalChartOptions
+});
+
+
+// rsi position chart
+const rsipos = document.getElementById('rsi-pos').getContext('2d');
+let rsiPos = new Chart(rsipos, {
+    type: 'line',
+    data: {
+        labels: globalCoinIndex,
+        datasets: [{
+            label: 'Position Type: (0 = no position, 1 = long, -1 = short)',
+            data: globalRSIPos,
+            lineTension: 0,
+            backgroundColor: 'rgba(60,60,60,1)',
+            radius: 0,
+            borderWidth: 1,
+            borderColor: 'rgba(0,0,0,1)'
+        }]
+    },
+    options: globalChartOptions
+});
+
+
+// rsi rsi chart
+const rsirsi = document.getElementById('rsi-chart').getContext('2d');
+let rsiRsi = new Chart(rsirsi, {
+    type: 'line',
+    data: {
+        labels: globalCoinIndex,
+        datasets: [{
+            label: 'RSI',
+            data: [0],
+            lineTension: 0,
+            backgroundColor: 'rgba(60,60,60,0)',
+            radius: 0,
+            borderWidth: 1,
+            borderColor: 'rgba(160,0,0,0.8)'
+        },{
+            label: 'RSI Oversold',
+            data: globalRSIOSOBLines[0],
+            lineTension: 0,
+            backgroundColor: 'rgba(60,60,60,0)',
+            radius: 0,
+            borderWidth: 1,
+            borderColor: 'rgba(0,0,0,1)'
+        },{
+            label: 'RSI Overbought',
+            data: globalRSIOSOBLines[1],
+            lineTension: 0,
+            backgroundColor: 'rgba(60,60,60,0)',
+            radius: 0,
+            borderWidth: 1,
+            borderColor: 'rgba(0,0,0,1)'
+        }]
+    },
+    options: {
+        scales: {
+            yAxes: [{
+                ticks: {
+                    beginAtZero: true,
+                    stepSize: 0.1,
+                    suggestedMin: 0,
+                    suggestedMax: 100
+                }
+            }]
+        },
+        hover: {
+            animationDuration: 0
+        },
+        animation: {
+            duration: 0,
+            easing: 'none'
+        },
+        tooltips: {
+            mode: 'nearest',
+            intersect: false
+        }
+    }
+});
+
+
+// rsi equity chart
+const rsieq = document.getElementById('rsi-strat').getContext('2d');
+
+let rsiChart = new Chart(rsieq, {
+    type: 'line',
+    data: {
+        labels: globalCoinIndex,
+        datasets: [{
+            label: 'Coin distance equity (correct - wrong)',
+            data: globalRSIEquity,
+            lineTension: 0,
+            backgroundColor: 'rgba(228, 170, 12, 1)',
+            radius: 0,
+            borderWidth: 1,
+            borderColor: 'rgba(0,0,0,1)'
+        }]
+    },
+    options: globalChartOptions
+});
+
+
+// ---------------------------------------------------------------------- button functions -----------------------------------------------------------------------
+// button function to reset get new 1000 coinflip data
+const newCoinData = (numflips) => {
+    //console.log(numflips);
+
+    //assign the global number of coin flips to passed args
+    globalConfigNumCoinflips = numflips;
+
+    //empty old data
+    globalCoinData = [0];
+    globalCoinIndex = [];
+    globalCoinOffset = [0];
+
+    //coin loop and push a 0 as the first value
+    let coinIteration = 0;
+    for (; coinIteration < globalConfigNumCoinflips; coinIteration++) {
+        //completely random number, coinflip based on odd/even
+        let tempRand = Math.floor(Math.random() * Math.floor(100000));
+
+        //push index value
+        globalCoinIndex.push(coinIteration);
+        
+        //grab last value to offset
+        let tempValue = globalCoinData[coinIteration]
+
+        //if tempRand is odd, % will be 1, even will be 0
+        if(tempRand % 2){
+            //odd - tails
+            tempValue--;
+            //console.log("a");
+            globalCoinData.push(tempValue);
+
+            //add to global coin offset
+            globalCoinOffset.push(-1);
+        }else{
+            //even - heads
+            tempValue++;
+            //console.log("b");
+            globalCoinData.push(tempValue);
+
+            //add to global coin offset
+            globalCoinOffset.push(1);
+        };
+    };
+    //need to push one more on the index to match the data
+    globalCoinIndex.push(globalConfigNumCoinflips);
+    //console.log(globalCoinData);
+    
+
+
+    //push updates
+    coinChart.data.labels = globalCoinIndex;
+    coinChart.data.datasets[0].data = globalCoinData;
+    coinChart.update();
+
+
+    //call SMA and RSI function
+    doSMAStuff();
+    doRSIStuff();
+};
+
+
+const doSMAStuff = () => {
+    //console.log(globalSMAEquity);
+    // SMA stuff
+    //empty old sma
+    globalSMA = [];
+    globalSMAEquity = [0];
+    globalSMAPos = [0];
+    globalPaidInCommission = 0;
+    globalNumTrades = 0;
+
+    //this is a var that stores the previous over(1) or under(0) of sma crossover, so you can compare the new over or under to see if it was a crossover, -1 is no data
+    let priorCrossDir = -1;
+
+    // loop for num coin flip iterations
+    let smaIteration = 0;
+    for (; smaIteration < globalConfigNumCoinflips + 1; smaIteration++) {
+
+        //----------------------------------------- chart 1 stuff - SMA creation -------------------------------------------------------------
+        if(smaIteration < globalConfigSMALength - 1){
+            globalSMA.push(0);
+        }else{
+            //grab the completely added values of the previous x, start at beginning and work towards actual index value
+            let smaRangeArray = globalCoinData.slice(smaIteration - globalConfigSMALength, smaIteration);
+            let smaAve = smaRangeArray.reduce((a,b) => a + b, 0) / smaRangeArray.length;
+
+            //make it lower precision
+            smaAve = smaAve.toPrecision(3);
+            //console.log(smaAve);
+            globalSMA.push(smaAve);
+        };
+
+        //----------------------------------------- chart 2 stuff - positions // chart 3 stuff - equity change based on position -------------------------------------------------------------
+        //temp save actual price
+        let tempCurrPrice = globalCoinData[smaIteration];
+        let tempCurrSMA = globalSMA[smaIteration];
+
+        //grab last equity value
+        let lastEquityValue = globalSMAEquity[smaIteration];
+        let fixedEquityValue = Number(lastEquityValue.toFixed(2));
+
+        //grab current price change
+        let priceChange = tempCurrPrice - globalCoinData[smaIteration - 1];
+        //console.log(priceChange);
+
+        //check if crossover
+        if(tempCurrPrice > tempCurrSMA){
+            //price is above sma
+
+            //check if prior was below, so 0
+            if(priorCrossDir == 0){
+                //did cross to above
+                globalSMAPos.push(2);
+
+                //add to number of trades
+                globalNumTrades++;
+
+                //record commission payment
+                globalPaidInCommission += globalCrossCommission;
+                globalPaidInCommission = Number(globalPaidInCommission.toFixed(2));
+
+                //pay a crossover commission, more realistic to pay a spread of some kind
+                fixedEquityValue = fixedEquityValue - globalCrossCommission;
+            }else{
+                //did not cross above, but is just above trending
+                globalSMAPos.push(1);
+
+                //add to equity in long position
+                fixedEquityValue = fixedEquityValue + priceChange;
+            };
+
+            //finalize equity
+            globalSMAEquity.push(fixedEquityValue);
+            
+
+            //change priorCross
+            priorCrossDir = 1;
+        }else if(tempCurrPrice < tempCurrSMA){
+            //price is below sma
+
+            //check if prior was above, so 1
+            if(priorCrossDir == 1){
+                //did cross to below
+                globalSMAPos.push(-2);
+
+                //add to number of trades
+                globalNumTrades++;
+
+                //record commission payment
+                globalPaidInCommission += globalCrossCommission;
+                globalPaidInCommission = Number(globalPaidInCommission.toFixed(2));
+
+                //pay a crossover commission, more realistic to pay a spread of some kind
+                fixedEquityValue = fixedEquityValue - globalCrossCommission;
+            }else{
+                //did not cross below, but is just below trending
+                globalSMAPos.push(-1);
+
+                //add to equity in short position
+                fixedEquityValue = fixedEquityValue - priceChange;
+            };
+
+            //finalize equity
+            globalSMAEquity.push(fixedEquityValue);
+
+            //change priorCross
+            priorCrossDir = 0;
+        }else{
+            //if no cross and price was exactly the same, should be super rare
+            globalSMAPos.push(0);
+
+            //slide equity over to no change
+            globalSMAEquity.push(fixedEquityValue);
+        };
+
+
+
+        //debug: grab index, price change, and final number
+        //console.log("index: " + smaIteration + ". price change: " + priceChange + " = " + lastEquityValue);
+        //console.log(globalSMAEquity);
+    };
+
+        
+    //push last equity price
+    globalSMAEnding.push(globalSMAEquity[globalSMAEquity.length - 1]);
+    let smaAveEnding = globalSMAEnding.reduce((a,b) => a + b, 0) / globalSMAEnding.length;
+    smaAveEnding = Number(smaAveEnding.toFixed(2));
+    //console.log(smaAveEnding);
+
+    //shift forward both sma chart data and sma position data to match up
+    globalSMAPos.shift();
+    globalSMAEquity.shift();
+    
+    //push updates
+    coinChart.data.datasets[1].label = 'Simple Moving Average ' + globalConfigSMALength + ' Flips';
+    coinChart.data.datasets[1].data = globalSMA;
+    coinChart.update();
+
+    smaPos.data.labels = globalCoinIndex;
+    smaPos.data.datasets[0].data = globalSMAPos;
+    smaPos.update();
+
+    smaChart.data.labels = globalCoinIndex;
+    smaChart.data.datasets[0].data = globalSMAEquity;
+    smaChart.update();
+
+    //update paid commission number
+    let paidComOutput = document.getElementById("paid-com");
+    paidComOutput.innerHTML = globalPaidInCommission;
+
+    //update ave per trade number
+    let aveTrade = document.getElementById("ave-trade");
+    let realNumAve = globalSMAEquity[globalSMAEquity.length - 1] / globalNumTrades;
+    aveTrade.innerHTML = realNumAve.toFixed(2);
+
+    //update ave equity 
+    let aveEnding = document.getElementById("ave-ending");
+    aveEnding.innerHTML = smaAveEnding;
+    
+
+    //debug: wtf happening
+    //console.log(globalSMAEquity[globalSMAEquity.length - 1]);
+};
+
+
+const doRSIStuff = () => {
+    //should be noted it isnt an exponential, its a simple rsi
+
+    //empty rsi object
+    globalRSI = [50];
+    //console.log(globalRSI);
+    globalRSIEquity = [0];
+    globalRSIOSOBLines = [[30],[70]];
+    globalRSIPos = [0];
+
+    //loop thru number of total coin flips
+    let rsiIteration = 0;
+    for (; rsiIteration < globalConfigNumCoinflips; rsiIteration++) {
+        //check if starting phase, under X rsi length
+        if(rsiIteration < globalConfigRSILength){
+            //under length calc nothing, just push x rsi lengths 0's
+            globalRSI.push(50);
+        }else{
+            //over the x rsi length, so calc full simple RSI
+
+            //get rsi and push it
+            let iterationRSI = convertOffsetToRSI(rsiIteration);
+            globalRSI.push(iterationRSI);
+
+            //figure out rsi positions
+            layoutRSIPosition(rsiIteration);
+        };
+
+        //for entire iteration need to loop thru and add oversold and overbought lines
+        globalRSIOSOBLines[0].push(30);
+        globalRSIOSOBLines[1].push(70);
+
+    };
+    //console.log(globalCoinOffset);
+
+    //update charts
+    rsiPos.update();
+
+    rsiRsi.data.datasets[1].data = globalRSIOSOBLines[0];
+    rsiRsi.data.datasets[2].data = globalRSIOSOBLines[1];
+    rsiRsi.data.labels = globalCoinIndex;
+    rsiRsi.data.datasets[0].data = globalRSI;
+    rsiRsi.update();
+
+    rsiChart.update();
+
+};
+
+
+const layoutRSIPosition = (iteration) => {
+    //grab previous position
+    let priorRSIPos = globalRSIPos[iteration];
+};
+
+
+const convertOffsetToRSI = (iteration) => {
+    //perform a slice based on x rsi length
+    let rsRangeArray = globalCoinOffset.slice(iteration - globalConfigRSILength, iteration);
+
+    //filter for gains and loss, this returns an array of all objects matching return statement
+    let rsGain = rsRangeArray.filter(function(returnThis){
+        return returnThis == 1;
+    });
+    let rsLoss = rsRangeArray.filter(function(returnThis){
+        return returnThis == -1;
+    });
+
+    //make the actual number the length of it
+    rsGain = rsGain.length;
+    rsLoss = rsLoss.length;
+
+    //average
+    rsGain = rsGain / globalConfigRSILength;
+    rsLoss = rsLoss / globalConfigRSILength;
+
+    //calc differential
+    let rsDifferential = rsGain / rsLoss;
+
+    //calc rsi
+    let finalRSI = 100 - (100 / (rsDifferential + 1));
+    finalRSI = Number(finalRSI.toFixed(2));
+
+    //return
+    return finalRSI;
+
+    
+};
+
+
+</script>
+</body>
+</html>
