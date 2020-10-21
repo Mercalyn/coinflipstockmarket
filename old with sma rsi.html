@@ -74,13 +74,6 @@
 <canvas id="sma-pos" width="98%" height="5px"></canvas>
 <canvas id="sma-strat" width="98%" height="15px"></canvas>
 <p>
-    The reason this has a high guess rating(+1% of n number of flips) is probably due to the fact that it isn't trying to
-    predict a correct flip, it is trying to predict %noncrossovers/%crossovers. When a crossover happens, it pays 1 coin distance 
-    because of uncertainty against another crossover. Too many crossovers will cause a large loss. Each move that does not have a crossover
-    event will typically add equity. Even if each coin flip
-    is a completely independent event, the majority of each coin position has a smaller chance of going in a direction
-    where it would cross the SMA. In other words, it has a higher chance of staying outside of the SMA than crossing it, resulting in
-    a correct guess.
 </p>
 
 <div>
@@ -99,8 +92,6 @@
     
 </div>
 <p>
-    RSI measures recent changes to past price action and plots it on a 0-100% graph. The opening strategy buys below 30% and shorts above 70%.
-    The closing strategy flattens the order at 50("fair value").
 </p>
 <canvas id="rsi-chart" width="98%" height="10px"></canvas>
 <canvas id="rsi-pos" width="98%" height="5px"></canvas>
@@ -451,7 +442,7 @@ const doSMAStuff = () => {
             let smaAve = smaRangeArray.reduce((a,b) => a + b, 0) / smaRangeArray.length;
 
             //make it lower precision
-            smaAve = smaAve.toPrecision(3);
+            smaAve = smaAve.toPrecision(5);
             //console.log(smaAve);
             globalSMA.push(smaAve);
         };
@@ -463,7 +454,7 @@ const doSMAStuff = () => {
 
         //grab last equity value
         let lastEquityValue = globalSMAEquity[smaIteration];
-        let fixedEquityValue = Number(lastEquityValue.toFixed(2));
+        let fixedEquityValue = Number(lastEquityValue.toFixed(5));
 
         //grab current price change
         let priceChange = tempCurrPrice - globalCoinData[smaIteration - 1];
@@ -476,14 +467,14 @@ const doSMAStuff = () => {
             //check if prior was below, so 0
             if(priorCrossDir == 0){
                 //did cross to above
-                globalSMAPos.push(2);
+                globalSMAPos.push(0);
 
                 //add to number of trades
                 globalNumTrades++;
 
                 //record commission payment
                 globalPaidInCommission += globalCrossCommission;
-                globalPaidInCommission = Number(globalPaidInCommission.toFixed(2));
+                globalPaidInCommission = Number(globalPaidInCommission.toFixed(5));
 
                 //pay a crossover commission, more realistic to pay a spread of some kind
                 fixedEquityValue = fixedEquityValue - globalCrossCommission;
@@ -507,14 +498,14 @@ const doSMAStuff = () => {
             //check if prior was above, so 1
             if(priorCrossDir == 1){
                 //did cross to below
-                globalSMAPos.push(-2);
+                globalSMAPos.push(0);
 
                 //add to number of trades
                 globalNumTrades++;
 
                 //record commission payment
                 globalPaidInCommission += globalCrossCommission;
-                globalPaidInCommission = Number(globalPaidInCommission.toFixed(2));
+                globalPaidInCommission = Number(globalPaidInCommission.toFixed(5));
 
                 //pay a crossover commission, more realistic to pay a spread of some kind
                 fixedEquityValue = fixedEquityValue - globalCrossCommission;
